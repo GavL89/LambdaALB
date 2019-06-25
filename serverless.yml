@@ -1,0 +1,113 @@
+service: LambdaALB
+
+provider:
+  name: aws
+  runtime: dotnetcore2.1
+  region: ap-southeast-2
+
+  iamRoleStatements:
+    - Effect: "Allow"
+      Action: "s3:ListBucket"
+      Resource:
+        Fn::Join:
+          - ""
+          - - "arn:aws:s3:::"
+            - "Ref" : "AssetsBucket"
+    - Effect: "Allow"
+      Action:
+        - "s3:GetObject"
+      Resource:
+        Fn::Join:
+          - ""
+          - - "arn:aws:s3:::"
+            - "Ref" : "AssetsBucket"
+            - "/*"
+
+custom:
+  vpcConfig:
+    vpcId: vpc-xxxxxxxx
+    subnets:
+      - subnet-xxxxxxxx
+      - subnet-xxxxxxxx
+      - subnet-xxxxxxxx
+
+package:
+  artifact: bin/release/netcoreapp2.1/package.zip
+
+functions:
+  hello:
+    handler: CsharpHandlers::Namespace.Page::FunctionHandler
+    events:
+      - alb:
+          listenerArn:
+            Ref: Listener
+          priority: 100
+          conditions:
+            path: /
+
+  webapi:
+    handler: CsharpHandlers::Namespace.API::FunctionHandler
+    events:
+      - alb:
+          listenerArn:
+            Ref: Listener
+          priority: 2
+          conditions:
+            path: /api/*
+
+  s3:
+    handler: CsharpHandlers::Namespace.S3::FunctionHandler
+    environment:
+      assetbucket:
+        Ref: AssetsBucket
+    events:
+      - alb:
+          listenerArn:
+            Ref: Listener
+          priority: 1
+          conditions:
+            path: /assets/*
+
+resources:
+  Resources:
+    AssetsBucket:
+      Type: AWS::S3::Bucket
+
+    SecurityGroup:
+      Type: AWS::EC2::SecurityGroup
+      Properties: 
+        GroupDescription: Generic HTTP Security Group
+        SecurityGroupIngress: 
+          -
+            CidrIp: 0.0.0.0/0
+            FromPort: 80
+            IpProtocol: tcp
+            ToPort: 80
+        VpcId: ${self:custom.vpcConfig.vpcId}
+
+    LoadBalancer:
+      Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+      Properties: 
+        SecurityGroups: 
+          - Ref: SecurityGroup
+        Subnets: 
+          ${self:custom.vpcConfig.subnets}
+
+    TargetGroup:
+      Type: AWS::ElasticLoadBalancingV2::TargetGroup
+      Properties: 
+        TargetType: lambda
+
+    Listener:
+      Type: AWS::ElasticLoadBalancingV2::Listener
+      Properties: 
+        DefaultActions: 
+          - 
+            Order: 1
+            TargetGroupArn:
+              Ref: TargetGroup
+            Type: forward
+        LoadBalancerArn:
+          Ref: LoadBalancer
+        Port: 80
+        Protocol: HTTP
